@@ -230,8 +230,12 @@
 
 (deftest prompt-value-classpath-fallback
   ;; The bundled adversarial-review.md ships under resources/cw/prompts/.
-  ;; prompt-value should locate it as a classpath resource cw/<path>.
-  (let [s (config/prompt-value {:file "prompts/adversarial-review.md"})]
-    (is (string? s))
-    (is (re-find #"Verdict|Adversarial|four passes" s)
-        "bundled prompt actually loaded via classpath fallback")))
+  ;; prompt-value's lookup order is abs → config-dir-relative → classpath.
+  ;; If `cw config init` has scaffolded ~/.config/cw/prompts/adversarial-review.md,
+  ;; step 2 would silently win and we'd never test the classpath fallback.
+  ;; Stubbing config-dir to a guaranteed-empty path forces step 3.
+  (with-redefs [cw.config/config-dir (constantly "/var/empty/cw-test-no-such")]
+    (let [s (config/prompt-value {:file "prompts/adversarial-review.md"})]
+      (is (string? s))
+      (is (re-find #"Verdict|Adversarial|four passes" s)
+          "bundled prompt actually loaded via classpath fallback"))))
