@@ -34,16 +34,23 @@
         "gate is transparent: {{prev}} for :b is :a's output, not the gate's")))
 
 (deftest gate-without-tty-or-yes-fails-closed
-  (let [cr (chain/run-chain
-            cfg {:steps [{:id :a :cmd ["printf" "one"]}
-                         {:id :g :gate "proceed?"}
-                         {:id :b :cmd ["printf" "SHOULD-NOT-RUN"]}]
-                 :stdin nil :args [] :yes false})]
-    (is (not (:ok? cr)))
-    (is (= :gate-rejected (get-in cr [:error :type])))
-    (is (= :g (:failed-at cr)))
-    (is (= 2 (count (:results cr))) "stops at the gate; :b never runs")
-    (is (not (some #(= "SHOULD-NOT-RUN" (:text %)) (:results cr))))))
+  ;; Stub ask-tty so this test is hermetic regardless of whether the runner
+  ;; has a controlling terminal — without the stub, a real /dev/tty (e.g.
+  ;; running `bb test` in an interactive shell) would prompt the developer
+  ;; and corrupt the assertions based on what they type.
+  (with-redefs [cw.chain/ask-tty
+                (fn [_] (throw (java.io.FileNotFoundException.
+                                "no controlling tty (stubbed)")))]
+    (let [cr (chain/run-chain
+              cfg {:steps [{:id :a :cmd ["printf" "one"]}
+                           {:id :g :gate "proceed?"}
+                           {:id :b :cmd ["printf" "SHOULD-NOT-RUN"]}]
+                   :stdin nil :args [] :yes false})]
+      (is (not (:ok? cr)))
+      (is (= :gate-rejected (get-in cr [:error :type])))
+      (is (= :g (:failed-at cr)))
+      (is (= 2 (count (:results cr))) "stops at the gate; :b never runs")
+      (is (not (some #(= "SHOULD-NOT-RUN" (:text %)) (:results cr)))))))
 
 (deftest gate-works-in-dag-position
   ;; :depends-on makes this a DAG; the gate is its own wave between a and b.
