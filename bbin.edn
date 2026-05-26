@@ -1,0 +1,3 @@
+{:coords {:bbin/url "https://github.com/vihangd/cw"}
+ :lib io.github.vihangd/cw
+ :main-opts ["-m" "cw.main"]}

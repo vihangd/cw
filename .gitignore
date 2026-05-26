@@ -1,0 +1,32 @@
+# Clojure / Babashka caches
+.cpcache/
+.clj-kondo/
+.lsp/
+.nbb/
+.shadow-cljs/
+.calva/
+target/
+out/
+classes/
+pom.xml
+pom.xml.asc
+
+# Project-local overrides (per-project user config that should NOT be shared)
+.cw.edn
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.iml
+*~
+*.swp
+*.swo
+
+# Atomic-write tempfiles (cw.state writes <state>.tmp.<nanoTime> + rename)
+*.tmp.*
+
+# Local secrets / env (defensive — cw doesn't ship any today, but common)
+.env
+.env.*
+!.env.example

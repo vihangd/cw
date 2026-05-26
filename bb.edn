@@ -1,0 +1,17 @@
+{:paths ["src" "resources" "test"]
+ :deps  {cheshire/cheshire {:mvn/version "5.13.0"}
+         org.babashka/cli  {:mvn/version "0.8.61"}}
+ :bbin/bin {cw {:main-opts ["-m" "cw.main"]}}
+ :tasks
+ {test          {:requires ([clojure.test])
+                 :task (do (require 'cw.parse-test 'cw.chain-test
+                                    'cw.workflow-test 'cw.state-test
+                                    'cw.replay-test 'cw.provider-test
+                                    'cw.config-test 'cw.meta-test
+                                    'cw.gate-test 'cw.main-test)
+                           (let [{:keys [fail error]}
+                                 (clojure.test/run-all-tests (re-pattern "cw\\..*-test"))]
+                             (System/exit (if (zero? (+ fail error)) 0 1))))}
+  install-local {:task (shell "bbin install . --as cw")}
+  uninstall     {:task (shell "bbin uninstall cw")}
+  doctor        {:task (clojure "-M -m cw.main doctor")}}}

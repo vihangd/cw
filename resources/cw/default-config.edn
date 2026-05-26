@@ -1,0 +1,248 @@
+;; cw baked-in defaults. User config at ~/.config/cw/config.edn is deep-merged
+;; over this; an optional ./.cw.edn is merged last (project-level overrides).
+;;
+;; Prompt reuse: steps reference :roles (persona) + :skills (task) + :tiers
+;; (provider/model); {{fragment:NAME}} embeds a :fragments snippet. A
+;; roles/skills/fragments value is an inline string OR {:file "prompts/x.md"}.
+;; Step-sequence reuse: a {:use :phase} step splices :phases/<phase>/:steps.
+{:default-provider :claude
+ :default-verbosity 0
+ :max-cost-usd-per-run nil
+ :log-runs? true
+ :log-dir "~/.local/state/cw/runs"
+ :state-file "~/.local/state/cw/state.edn"
+ :fanout-concurrency 4
+ :blacklist-threshold 3
+
+ :providers
+ {:claude {:cmd "claude"
+           :args ["-p" "--output-format" "json"]   ; NOTE: no --bare → RTK/lean-ctx work
+           :prompt-via :arg
+           :parser :claude-json
+           :model "claude-sonnet-4-5"
+           :alias [:c]
+           :supports-schema false
+           :daily-request-limit nil
+           :pricing-key "claude"}
+  :gemini {:cmd "gemini"
+           :args ["--output-format" "json"]
+           ;; NOTE: deviates from LLD §3.5 (:prompt-via :stdin). Real gemini
+           ;; --help: -p/--prompt is required to enter headless mode; a bare
+           ;; positional or stdin-only invocation stays interactive and hangs.
+           :prompt-via :arg
+           :prompt-flag "-p"
+           :model-flag "--model"
+           :parser :gemini-json
+           :model "gemini-2.5-pro"
+           :alias [:g]
+           :supports-schema false
+           :daily-request-limit 1000
+           :reset-hour-utc 0
+           :pricing-key "gemini"}
+  :codex  {:cmd "codex"
+           :args ["exec" "--json" "--skip-git-repo-check"]
+           :prompt-via :arg
+           :parser :codex-jsonl
+           :model "gpt-5-codex"
+           :alias [:x :o]
+           :supports-schema true
+           :schema-flag "--output-schema"
+           :daily-request-limit nil
+           :pricing-key "codex"}
+  ;; qwen-code: OpenAI-API-compatible client (DashScope, local llama.cpp/vLLM
+  ;; via --openai-base-url, etc). Headless: positional prompt, default
+  ;; one-shot; --output-format json → JSON array of events with a terminal
+  ;; {type:"result"}. Native --json-schema. No :pricing-key by default —
+  ;; the actual model depends on the user's qwen settings; add a :pricing
+  ;; entry for the model you use to get cost reporting.
+  :qwen   {:cmd "qwen"
+           :args ["--output-format" "json"]
+           :prompt-via :arg
+           :parser :qwen-json
+           :model-flag "--model"
+           :alias [:q]
+           :supports-schema true
+           :schema-flag "--json-schema"
+           :daily-request-limit nil}}
+
+ ;; ── shared prompt library ───────────────────────────────────────────────────
+ :tiers
+ {:cheap {:provider :claude :model "claude-haiku-4-5"}
+  :think {:provider :claude :model "claude-sonnet-4-5"}}
+
+ :roles
+ {:researcher "You are a meticulous research investigator. Verify claims, cross-reference sources, distinguish signal from noise; never present speculation as fact or omit conflicting evidence; corroborate across at least two independent sources."
+  :analyst "You are a rigorous insight analyst. Interrogate the material, quantify where possible, separate correlation from causation, report gaps as findings, and attach a confidence level to every conclusion; lead with impact, not order of discovery."
+  :writer "You are a technical writer: clarity over cleverness, lead with the answer, one idea per paragraph, scannable headings, cut every word that does not earn its place. No TODO/TBD placeholders."
+  :critic "You are a seasoned adversarial reviewer. You stress-test artifacts before users do; you have never seen one without issues, and the ones that look cleanest hide assumptions in plain sight. You are NOT a rubber stamp and you do NOT manufacture problems."
+  :security-auditor "You are an adversarial security auditor. Assume hostile input and a motivated attacker; prefer concrete exploit paths over theoretical concerns."
+  :architect "You are a pragmatic software architect: the simplest design that meets the requirement, with explicit trade-offs and named risks."
+  :test-engineer "You are a test engineer who reasons about blast radius: what a change can break, which paths are now untested, and the cheapest test that would have caught it."
+  :maintainer "You are an empathetic, precise open-source maintainer."
+  :triage-engineer "You are a triage engineer: decisive, terse, rule-driven."
+  :janitor "You are a meticulous repository janitor: clean history, Conventional Commits, no attribution noise. You execute git commands yourself and verify the result."}
+
+ :fragments
+ {:verdict-tail "The VERY LAST line of your output must be exactly one of:\n### Verdict: APPROVED\n### Verdict: REVISE\n### Verdict: REJECTED\nAPPROVED = no Critical/Major functional or security findings (the common outcome for working code). REVISE = broken behavior, crashes/failing tests, or a real security vulnerability. REJECTED = fundamentally broken. Output nothing after the verdict line."
+  :gh-verdict-token "Output EXACTLY one token and nothing else (no punctuation, no explanation, no whitespace lines):\n--approve  (if the review's final verdict is APPROVED)\n--request-changes  (if the verdict is REVISE or REJECTED)\n--comment  (if there is no clear verdict)"
+  :finding-format "For each finding:\n### [TAG]-NNN: Title\n- Severity: Critical | Major | Minor\n- Description / Impact / Recommendation\nBe specific (\"fails when X because Y\", not \"could fail\"). If there genuinely are none, say so explicitly."}
+
+ :skills
+ {:literature-review "Research this topic thoroughly and synthesize a structured brief.\n\nTOPIC: {{arg-1}}\n{{stdin}}\n\nProcess: (1) define scope and relevant source types; (2) identify 5-10 relevant sources, noting author/org, key claims, and reliability; (3) cross-reference — mark consensus vs conflict, facts vs opinion vs speculation, and gaps; (4) synthesize BY THEME, not by source.\n\nOutput:\n# Literature Review: <topic>\n## Key Themes  (per theme: synthesis across sources)\n## Areas of Consensus\n## Areas of Disagreement  (present both sides)\n## Gaps and Open Questions\n## Sources  (table: # | Title | Author/Org | Type | Relevance)\nCite every claim and name a confidence level (high/medium/low) for each conclusion."
+  :insight-analysis "From the research below, extract structured insights. For each:\n### Insight: Title\n- Finding / Evidence / Confidence (High|Medium|Low) / Impact / Recommendation\nThen list Anomalies, Gaps & Limitations, and Recommended Actions prioritized by impact × confidence.\n\nRESEARCH:\n{{prev}}"
+  :report-write "Write a final report from the research and analysis below.\n\nRESEARCH:\n{{step-gather}}\n\nANALYSIS:\n{{step-analyze}}\n\nStructure: a 1-2 sentence overview (what this is and who it is for), 3-7 sections each leading with its key point and a concrete example, then a \"Next Steps\" section."
+  :content-research "Research this topic and produce a structured brief organized BY THEME (not by source), with a Sources table and a confidence level on each conclusion.\n\nTOPIC: {{arg-1}}\n{{stdin}}"
+  :content-draft "From the research below, write a complete first draft. Identify the audience and what they need to learn; outline (an intro stating what this is and why the reader should care, 3-7 sections, a conclusion); then write — lead each section with its most important point, use concrete examples, one idea per paragraph, headers for navigation.\n\nRESEARCH:\n{{prev}}"
+  :edit-4pass "Apply four passes to the draft below:\n1. Structure — clear arc, informative (not label) headings, front-load key info, merge repetition.\n2. Clarity — newcomer-readable, define or replace jargon, active voice, sentences < 25 words, paragraphs < 5 sentences.\n3. Accuracy — claims match the source, examples correct and copy-pasteable, no contradictions.\n4. Conciseness — cut filler (\"basically/actually/simply/just\"), unjustified hedges, redundant phrases; target ~20% shorter.\nReturn the edited document, then a \"## Changelog\" listing the substantive changes.\n\nDRAFT:\n{{prev}}"
+  :adversarial-review {:file "prompts/adversarial-review.md"}
+  :commit-changes {:file "prompts/commit-changes.md"}
+  :commit-conventional "From the staged diff, output EXACTLY one line:\n  <type>(<scope>): <summary>\nRules: type ∈ feat|fix|refactor|perf|docs|test|build|chore; infer it from the diff (new behavior=feat, bug=fix, no behavior change=refactor/chore). scope is optional, lowercase, derived from the dominant path. summary is imperative mood, ≤ 72 chars total line, no trailing period. Output ONLY the line — no body, no backticks, no preamble.\n\n{{stdin}}"
+  :explain-error "Be direct; lead with the fix, not narration. Output exactly these three sections and nothing else:\n\n**Cause:** one sentence — the actual root cause, not the symptom.\n**Fix:** the exact command, code edit, or config change to apply (copy-pasteable).\n**Confidence:** high | medium | low — and if not high, the one thing you'd check to confirm.\n\nError:\n{{stdin}}"
+  :summarize "Summarize the text below in 2-3 plain sentences. Preserve key facts and numbers; drop hedging and meta-commentary. Output ONLY the summary, no preamble.\n\n{{stdin}}"
+  :translate "Translate the text below into this target language: \"{{arg-1}}\". If the target is blank, translate into French. Output ONLY the translation — no notes, no transliteration, no original text.\n\n{{prev}}"
+  :triage-classify "Read the issue JSON and output EXACTLY one token, nothing else:\nneeds-info   — missing repro / version / details required to act\ncan-fix      — clear, small, well-scoped bug with an obvious fix\nneeds-design — real work but needs an architectural/product decision\nwontfix      — out of scope, works as intended, or a duplicate\n\nIssue:\n{{step-fetch}}"
+  :triage-message "The triage decision is \"{{step-classify}}\". Write the GitHub comment to post (Markdown, no preamble, no signature):\n- needs-info: ask for the SPECIFIC missing facts as a short checklist.\n- needs-design: state what decision/design is required and the options.\n- wontfix: explain kindly and precisely why, and suggest an alternative if any.\n- can-fix: one or two sentences confirming it's actionable and the intended fix direction.\nOutput ONLY the comment body.\n\nIssue:\n{{step-fetch}}"
+  :sec-review "Attack the diff below: STRIDE (spoofing, tampering, repudiation, info disclosure, DoS, elevation), injection, auth/authz bypass, unsafe deserialization, secrets, path traversal/SSRF, unsafe shell/SQL. {{fragment:finding-format}}\n\nDiff:\n{{stdin}}"
+  :correctness-review "Hunt logic errors, off-by-one, nil/None/undefined, error paths, race conditions, broken invariants, missing edge cases, and untested behavior in the diff below. {{fragment:finding-format}}\n\nDiff:\n{{stdin}}"
+  :perf-review "Find N+1 queries, accidental O(n^2), unbounded allocations, blocking I/O on hot paths, missing indexes/caching, and needless work in the diff below. Quantify where possible. {{fragment:finding-format}}\n\nDiff:\n{{stdin}}"
+  :merge-reviews "Consolidate the reviews into one report. Deduplicate overlapping findings, keep the highest severity when they conflict, group by severity (Critical → Major → Minor), preserve finding IDs. End with EXACTLY one line: \"### Verdict: APPROVED\" (no Critical/Major) or \"### Verdict: REVISE\" (≥1 Critical/Major). Nothing after it.\n\nSecurity:\n{{step-security}}\n\nCorrectness:\n{{step-correctness}}\n\nPerformance:\n{{step-performance}}"
+  :spec-writer "Write a concise engineering spec for the topic below.\n\nTOPIC: {{arg-1}}\n{{stdin}}\n\nSections: Problem (1 paragraph) · Goals / Non-goals · Proposed approach · Data/API shape · Edge cases & failure modes · Risks & open questions · Acceptance criteria (testable bullets). No implementation code."
+  :impact-analyzer "Given the diff below, report the blast radius.\n\nDiff:\n{{stdin}}\n\nOutput: Changed surface (functions/modules touched) · Direct callers/affected paths · Behavioral/contract changes · Now-untested behavior · Migration/compat concerns · The cheapest test that would catch a regression here. Be specific; cite symbols."
+  :threat-model "Produce a STRIDE threat model for the system/change described below.\n\nINPUT:\n{{stdin}}\n\nFor each STRIDE category (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege): plausible threats, the asset/entry point, likelihood × impact, and a concrete mitigation. End with the top 3 risks to address first."}
+
+ ;; ── reusable step-sequence (orca2 _git-ship-standalone, inlined) ────────────
+ :phases
+ {:git-ship
+  {:doc "Sync, LLM-commit, verify, push, open PR, return to default branch"
+   :steps
+   [{:id :sync-base
+     :cmd ["bash" "-c" "git fetch --quiet origin 2>/dev/null || true; D=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo main); if git show-ref --verify --quiet \"refs/remotes/origin/$D\"; then git rebase \"origin/$D\" 2>/dev/null && echo \"rebased onto origin/$D\" || echo \"rebase skipped (no changes or conflict)\"; else echo \"origin/$D not found, skipping rebase\"; fi"]}
+    {:id :changed-files
+     :depends-on [:sync-base]
+     :cmd ["bash" "-c" "echo '### tracked changes'; git diff --stat HEAD; echo; git diff --name-only HEAD; echo; echo '### untracked (informational)'; git ls-files --others --exclude-standard | head -50"]}
+    {:id :commit
+     :role :janitor
+     :skill :commit-changes
+     :tier :cheap
+     :fallback [:gemini]
+     :allowed-tools [:read :bash]
+     :depends-on [:changed-files]
+     :prompt "Title hint: {{arg-1}}\n\nWorking tree:\n{{step-changed-files}}"}
+    {:id :commit-verify
+     :depends-on [:commit]
+     :cmd ["bash" "-c" "if ! git diff --quiet HEAD --; then echo 'FAIL: tracked files still dirty after commit' >&2; git status --short >&2; exit 1; fi; echo 'commit-verify ok'"]}
+    {:id :push
+     :depends-on [:commit-verify]
+     :cmd ["bash" "-c" "git push -u origin HEAD 2>&1 || echo 'push skipped — no remote or push failed'"]}
+    {:id :create-pr
+     :depends-on [:push]
+     :cmd ["bash" "-c" "git ls-remote --exit-code origin >/dev/null 2>&1 || { echo 'no remote — skipping PR'; exit 0; }; T=\"$1\"; if [ -z \"$T\" ]; then T=$(git branch --show-current | sed 's|^[a-z]*/||; s|-| |g'); fi; gh pr create --title \"${T:-update}\" --body 'Opened by cw git-ship.' 2>&1 || echo 'PR exists or could not be created'"
+           "_" "{{arg-1}}"]}
+    {:id :return-to-base
+     :depends-on [:create-pr]
+     :cmd ["bash" "-c" "D=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo main); git checkout \"$D\" 2>/dev/null || git checkout main 2>/dev/null || git checkout master 2>/dev/null || echo \"could not switch to $D\""]}]}}
+
+ ;; ── workflows ───────────────────────────────────────────────────────────────
+ :workflows
+ {:commit-msg
+  {:doc "Conventional-commit message from staged diff"
+   :stdin-cmd ["git" "diff" "--staged"]
+   :steps [{:tier :cheap :skill :commit-conventional :fallback [:gemini]}]}
+
+  :explain-error
+  {:doc "Explain an error piped from stderr"
+   :steps [{:tier :cheap :skill :explain-error :fallback [:gemini]}]}
+
+  :summarize-translate
+  {:doc "Summarize then translate. Arg: target language (default French)."
+   :steps [{:tier :cheap :skill :summarize :fallback [:gemini]}
+           {:provider :gemini :skill :translate :fallback [:claude]}]}
+
+  :research
+  {:doc "Literature review → analysis → report. Arg: topic (stdin optional)."
+   :steps [{:id :gather  :tier :think :role :researcher :skill :literature-review :fallback [:gemini]}
+           {:id :analyze :tier :think :role :analyst :skill :insight-analysis :fallback [:gemini]}
+           {:id :report  :tier :think :role :writer :skill :report-write :fallback [:gemini]}]}
+
+  :content
+  {:doc "Blog/content pipeline: research → draft → edit. Arg: topic."
+   :steps [{:id :research :tier :think :role :researcher :skill :content-research :fallback [:gemini]}
+           {:id :draft    :tier :think :role :writer :skill :content-draft :fallback [:gemini]}
+           {:id :edit     :tier :think :role :writer :skill :edit-4pass :fallback [:gemini]}]}
+
+  :pr-review
+  {:doc "Adversarial review of a GitHub PR, posted back. Arg: PR number."
+   ;; orca2 pr-review. :conditional verdict→gh-flag routing is cw DATA FLOW:
+   ;; :verdict emits the flag as a value; :post passes cw vars as bash
+   ;; positionals ($1..$3) — review text never enters the script (injection-safe).
+   :steps
+   [{:id :preflight :cmd ["gh" "auth" "status"]}
+    {:id :fetch :cmd ["gh" "pr" "view" "{{arg-1}}"
+                      "--json" "number,title,body,headRefName,baseRefName,state,files,additions,deletions,author,url"]}
+    {:id :diff :cmd ["gh" "pr" "diff" "{{arg-1}}"]}
+    {:id :review :tier :think :role :critic :skill :adversarial-review :fallback [:gemini]
+     :prompt "PR metadata (JSON):\n{{step-fetch}}\n\nDiff:\n{{step-diff}}"}
+    {:id :verdict :provider :gemini :fallback [:claude]
+     :prompt "{{fragment:gh-verdict-token}}\n\nReview:\n{{step-review}}"}
+    {:id :post
+     :cmd ["bash" "-c"
+           "PR=\"$1\"; FLAG=$(printf %s \"$2\" | tr -d '[:space:]'); case \"$FLAG\" in --approve|--request-changes|--comment) ;; *) FLAG=--comment ;; esac; gh pr review \"$PR\" \"$FLAG\" --body \"$3\""
+           "_" "{{arg-1}}" "{{step-verdict}}" "{{step-review}}"]}]}
+
+  :triage-issue
+  {:doc "Triage ONE GitHub issue and ACT on it. Arg: issue number."
+   ;; orca2 github-triage per-issue body (cw has no :for-each). :conditional
+   ;; action routing is cw DATA FLOW via injection-safe bash positionals.
+   :steps
+   [{:id :fetch :cmd ["gh" "issue" "view" "{{arg-1}}"
+                      "--json" "number,title,body,labels,comments"]}
+    {:id :classify :tier :cheap :role :triage-engineer :skill :triage-classify
+     :fallback [:gemini] :depends-on [:fetch]}
+    {:id :message :tier :think :role :maintainer :skill :triage-message
+     :fallback [:gemini] :depends-on [:classify]}
+    {:id :act
+     :depends-on [:message]
+     :cmd ["bash" "-c"
+           "ISSUE=\"$1\"; DEC=$(printf %s \"$2\" | tr -d '[:space:]'); BODY=\"$3\"; case \"$DEC\" in needs-info) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue edit \"$ISSUE\" --add-label needs-info >/dev/null 2>&1; echo \"triaged #$ISSUE: needs-info\";; needs-design) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue edit \"$ISSUE\" --add-label needs-design >/dev/null 2>&1; echo \"triaged #$ISSUE: needs-design\";; wontfix) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue close \"$ISSUE\" --reason \"not planned\"; echo \"triaged #$ISSUE: wontfix (closed)\";; can-fix) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue edit \"$ISSUE\" --add-label can-fix >/dev/null 2>&1; echo \"triaged #$ISSUE: can-fix\";; *) echo \"no action: unrecognized decision '$2'\" >&2; exit 1;; esac"
+           "_" "{{arg-1}}" "{{step-classify}}" "{{step-message}}"]}]}
+
+  :code-review-multi
+  {:doc "Adversarial multi-perspective review of the branch diff (DAG)"
+   :stdin-cmd ["git" "diff" "main...HEAD"]
+   ;; 3 reviewers in parallel (wave 0) → merge (wave 1).
+   :steps
+   [{:id :security    :tier :think :role :critic :skill :sec-review :fallback [:gemini]}
+    {:id :correctness :provider :gemini :role :critic :skill :correctness-review
+     :fallback [:claude] :depends-on []}
+    {:id :performance :provider :gemini :role :critic :skill :perf-review
+     :fallback [:claude] :depends-on []}
+    {:id :merge :tier :think :role :critic :skill :merge-reviews :fallback [:gemini]
+     :depends-on [:security :correctness :performance]}]}
+
+  ;; ── git-ship: standalone use of the :git-ship phase ──────────────────────
+  :git-ship
+  {:doc "Commit (LLM message) → push → open PR. Arg: optional PR title."
+   :steps [{:use :git-ship}]}
+
+  ;; ── catalog: single-shot library workflows ───────────────────────────────
+  :security-review
+  {:doc "Adversarial security review. stdin = diff/code."
+   :steps [{:tier :think :role :security-auditor :skill :sec-review :fallback [:gemini]}]}
+
+  :threat-model
+  {:doc "STRIDE threat model. stdin = system/change description."
+   :steps [{:tier :think :role :security-auditor :skill :threat-model :fallback [:gemini]}]}
+
+  :spec
+  {:doc "Engineering spec from a topic. Arg: topic (stdin optional)."
+   :steps [{:tier :think :role :architect :skill :spec-writer :fallback [:gemini]}]}
+
+  :impact
+  {:doc "Blast-radius analysis of a change. stdin = diff."
+   :steps [{:tier :think :role :test-engineer :skill :impact-analyzer :fallback [:gemini]}]}}
+
+ :pricing
+ {"claude" {"claude-sonnet-4-5" {:input 3.0 :output 15.0 :cached-input 0.30}
+            "claude-haiku-4-5"  {:input 0.80 :output 4.0}}
+  "gemini" {"gemini-2.5-pro"    {:input 1.25 :output 10.0}}
+  "codex"  {"gpt-5-codex"       {:input 5.0 :output 30.0}}}}

@@ -1,0 +1,7 @@
+{:steps
+ [{:id :a :provider :claude :model "claude-haiku-4-5"
+   :prompt "Reply with exactly one word: apple"}
+  {:id :b :provider :claude :model "claude-haiku-4-5" :depends-on []
+   :prompt "Reply with exactly one word: banana"}
+  {:id :join :provider :claude :model "claude-haiku-4-5" :depends-on [:a :b]
+   :prompt "Reply with exactly: {{step-a}}+{{step-b}}"}]}

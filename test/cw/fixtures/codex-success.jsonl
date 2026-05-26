@@ -1,0 +1,4 @@
+{"type":"session.created","session_id":"c0de5e55-0000-4000-8000-000000000001"}
+{"type":"item.started","item":{"type":"assistant_message"}}
+{"type":"item.completed","item":{"type":"assistant_message","text":"hi"}}
+{"type":"turn.completed","usage":{"input_tokens":11,"output_tokens":2,"cached_input_tokens":0}}
