@@ -14,4 +14,7 @@
                              (System/exit (if (zero? (+ fail error)) 0 1))))}
   install-local {:task (shell "bbin install . --as cw")}
   uninstall     {:task (shell "bbin uninstall cw")}
-  doctor        {:task (clojure "-M -m cw.main doctor")}}}
+  ;; cw is a babashka tool — run through `bb`, not `clojure`, because the
+  ;; bundled babashka.fs (used by config/doctor/log/state) isn't on the
+  ;; clojure CLI's classpath unless deps.edn pins it explicitly.
+  doctor        {:task (shell "bb -m cw.main doctor")}}}
