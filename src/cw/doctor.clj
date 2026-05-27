@@ -22,12 +22,24 @@
          (check "config" :fail (str "invalid: " (.getMessage e))))))
 
 (defn- check-provider [config pk]
-  (let [cmd (get-in config [:providers pk :cmd])
-        path (which cmd)]
-    (if path
-      (check "providers" :ok (format "%s found at %s" (name pk) path))
-      (check "providers" :fail (format "%s (%s) not on PATH" (name pk) cmd)
-             (str "install the " (name pk) " CLI")))))
+  (let [cmd     (get-in config [:providers pk :cmd])
+        path    (which cmd)
+        default (= pk (:default-provider config))]
+    (cond
+      path (check "providers" :ok (format "%s found at %s" (name pk) path))
+      ;; Missing providers are optional in cw's multi-provider model — they
+      ;; warn, not fail. Default provider gets a sharper hint since `cw`
+      ;; with no -p will fail until it's installed or default is changed.
+      default
+      (check "providers" :warn
+             (format "%s (%s) not on PATH — this is :default-provider"
+                     (name pk) cmd)
+             (str "install " (name pk)
+                  ", or change :default-provider in your config"))
+      :else
+      (check "providers" :warn
+             (format "%s (%s) not on PATH (optional)" (name pk) cmd)
+             (str "install if you want `-p " (name pk) "` to work")))))
 
 (defn- check-rtk []
   (if-let [p (which "rtk")]
