@@ -14,6 +14,9 @@ pom.xml.asc
 # Project-local overrides (per-project user config that should NOT be shared)
 .cw.edn
 
+# Serena LSP tool metadata
+.serena/
+
 # Editor / OS
 .DS_Store
 .idea/

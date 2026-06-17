@@ -1,5 +1,6 @@
 (ns cw.config-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [cw.config :as config]))
 
 (def deep-merge #'cw.config/deep-merge)
@@ -71,7 +72,42 @@
         "shipped + ported + catalog workflows present")
     (is (contains? (:phases c) :git-ship))
     (is (seq (:roles c)))
-    (is (seq (:skills c)))))
+    (is (seq (:skills c)))
+    (testing "loop-harness verify-gate borrow is wired + valid"
+      (is (contains? (:phases c) :verify-gate))
+      (is (contains? (:workflows c) :verify))
+      (is (= [:verdict-pass-fail :result-line]
+             (filter #{:verdict-pass-fail :result-line} (keys (:fragments c))))
+          "both new fragments present")
+      (is (get-in c [:skills :skeptical-verify :file]))
+      (let [steps (:steps (config/resolve-workflow c "verify"))]
+        (is (= [:verify-gate__verify :verify-gate__enforce] (mapv :id steps))
+            "phase spliced with id-prefix")
+        (is (some #(re-find #"\{\{step-verify-gate__verify\}\}" %)
+                  (:cmd (second steps)))
+            "enforce step reads the prefixed verdict ref as a bash positional arg")
+        (is (re-find #"PASS or FAIL|PASS \(|FAIL" (:prompt (first steps)))
+            "verdict fragment composed into the verify prompt")))
+    (testing "loop-harness gap-closer workflows + skills resolve"
+      (doseq [w [:fix-ci :dep-audit :doc-sync :git-ship-verified]]
+        (is (contains? (:workflows c) w) (str w " present"))
+        (is (seq (:steps (config/resolve-workflow c (name w))))
+            (str w " expands")))
+      (doseq [s [:ci-diagnose :dependency-audit :doc-drift]]
+        (is (get-in c [:skills s :file]) (str s " skill is file-backed"))
+        (is (string? (config/prompt-value (get-in c [:skills s])))
+            (str s " skill file loads")))
+      (testing "git-ship-verified splices verify-gate then git-ship"
+        (let [ids (mapv :id (:steps (config/resolve-workflow c "git-ship-verified")))]
+          (is (= [:verify-gate__verify :verify-gate__enforce] (subvec ids 0 2)))
+          (is (some #(= :git-ship__commit %) ids))))
+      (testing "RESULT sentinel emitted by action steps"
+        (let [act (->> (config/resolve-workflow c "triage-issue") :steps
+                       (filter #(= :act (:id %))) first :cmd (str/join " "))]
+          (is (re-find #"RESULT: DONE items=" act)))
+        (let [post (->> (config/resolve-workflow c "pr-review") :steps
+                        (filter #(= :post (:id %))) first :cmd (str/join " "))]
+          (is (re-find #"RESULT: DONE items=" post)))))))
 
 ;; ── shared library expansion (the two pillars) ──────────────────────────────
 

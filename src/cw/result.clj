@@ -1,4 +1,5 @@
-(ns cw.result)
+(ns cw.result
+  (:require [clojure.string :as str]))
 
 ;; §3.2 — single step / provider execution outcome.
 (defrecord Result
@@ -46,3 +47,27 @@
     :or   {results [] final-text ""}}]
   (->ChainResult (boolean ok?) results final-text total-cost-usd
                  total-duration-ms failed-at error run-id plan))
+
+;; ── loop-harness RESULT: protocol (opt-in via --result-codes) ───────────────
+(defn result-exit-code
+  "Maps a finished result to a process exit code. Default (result-codes? falsey)
+   is the legacy 0/1 on :ok?. When result-codes? is true AND the run succeeded,
+   the terminal `RESULT:` sentinel in the text refines the code:
+     RESULT: NOTHING_TO_DO → 0 · RESULT: BLOCKED … → 2 · RESULT: DONE …/none → 0.
+   A failed run is always 1 regardless of the flag."
+  [result result-codes?]
+  (let [ok? (:ok? result)]
+    (cond
+      (not ok?) 1
+      (not result-codes?) 0
+      :else
+      (let [text (or (:final-text result) (:text result) "")
+            line (->> (str/split-lines (str text))
+                      (map str/trim)
+                      (filter #(str/starts-with? % "RESULT:"))
+                      last)]
+        (cond
+          (nil? line) 0
+          (re-find #"(?i)\bNOTHING_TO_DO\b" line) 0
+          (re-find #"(?i)\bBLOCKED\b" line) 2
+          :else 0)))))

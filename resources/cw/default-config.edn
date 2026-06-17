@@ -63,7 +63,40 @@
            :alias [:q]
            :supports-schema true
            :schema-flag "--json-schema"
-           :daily-request-limit nil}}
+           :daily-request-limit nil}
+  ;; nyma: emits the claude-style result JSON object on stdout, so it reuses
+  ;; the :claude-json parser. Positional prompt (:prompt-via :arg), model via
+  ;; -m. total_cost_usd is emitted directly; :pricing-key "claude" is a fallback.
+  :nyma   {:cmd "nyma"
+           :args ["-p" "--output-format" "json"]
+           :prompt-via :arg
+           :parser :claude-json
+           :model "claude-sonnet-4-20250514"
+           :model-flag "-m"
+           :alias [:ny]
+           :supports-schema false
+           :daily-request-limit nil
+           :pricing-key "claude"}
+  ;; nyma-local: nyma driving a small/LOCAL model via its built-in local
+  ;; provider presets (ollama @ :11434, lmstudio @ :1234, omlx @ :8000).
+  ;; --ext-small-model turns on nyma's small-model reliability layer. Local =
+  ;; free, so :pricing-key is nil (nyma emits total_cost_usd 0). On an empty
+  ;; reply / error nyma emits the claude result JSON with is_error true, so the
+  ;; :fallback chain below kicks in. NOTE: local models are SLOW. cw's run
+  ;; timeout is GLOBAL (default 300000ms in provider.clj), not per-provider —
+  ;; there is no provider-level timeout field. Raise it per run with the
+  ;; `--timeout <seconds>` CLI flag (e.g. `--timeout 600`).
+  :nyma-local {:cmd "nyma"
+               :args ["-p" "--output-format" "json" "--ext-small-model"]
+               :prompt-via :arg
+               :parser :claude-json
+               :model "ollama/qwen2.5-coder"
+               :model-flag "-m"
+               :alias [:nls]
+               :supports-schema false
+               :daily-request-limit nil
+               :pricing-key nil
+               :fallback [:claude]}}
 
  ;; ── shared prompt library ───────────────────────────────────────────────────
  :tiers
@@ -85,7 +118,9 @@
  :fragments
  {:verdict-tail "The VERY LAST line of your output must be exactly one of:\n### Verdict: APPROVED\n### Verdict: REVISE\n### Verdict: REJECTED\nAPPROVED = no Critical/Major functional or security findings (the common outcome for working code). REVISE = broken behavior, crashes/failing tests, or a real security vulnerability. REJECTED = fundamentally broken. Output nothing after the verdict line."
   :gh-verdict-token "Output EXACTLY one token and nothing else (no punctuation, no explanation, no whitespace lines):\n--approve  (if the review's final verdict is APPROVED)\n--request-changes  (if the verdict is REVISE or REJECTED)\n--comment  (if there is no clear verdict)"
-  :finding-format "For each finding:\n### [TAG]-NNN: Title\n- Severity: Critical | Major | Minor\n- Description / Impact / Recommendation\nBe specific (\"fails when X because Y\", not \"could fail\"). If there genuinely are none, say so explicitly."}
+  :finding-format "For each finding:\n### [TAG]-NNN: Title\n- Severity: Critical | Major | Minor\n- Description / Impact / Recommendation\nBe specific (\"fails when X because Y\", not \"could fail\"). If there genuinely are none, say so explicitly."
+  :verdict-pass-fail "Output EXACTLY one token and nothing else (no punctuation, no prose, no blank lines): PASS (the work meets every success criterion) or FAIL (any criterion unmet, any check failing, any unverified claim). Default to FAIL if unsure."
+  :result-line "End your output with a final line that is EXACTLY one of:\nRESULT: DONE items=<n>\nRESULT: NOTHING_TO_DO\nRESULT: BLOCKED reason=<short>\nNothing after that line."}
 
  :skills
  {:literature-review "Research this topic thoroughly and synthesize a structured brief.\n\nTOPIC: {{arg-1}}\n{{stdin}}\n\nProcess: (1) define scope and relevant source types; (2) identify 5-10 relevant sources, noting author/org, key claims, and reliability; (3) cross-reference — mark consensus vs conflict, facts vs opinion vs speculation, and gaps; (4) synthesize BY THEME, not by source.\n\nOutput:\n# Literature Review: <topic>\n## Key Themes  (per theme: synthesis across sources)\n## Areas of Consensus\n## Areas of Disagreement  (present both sides)\n## Gaps and Open Questions\n## Sources  (table: # | Title | Author/Org | Type | Relevance)\nCite every claim and name a confidence level (high/medium/low) for each conclusion."
@@ -108,7 +143,11 @@
   :merge-reviews "Consolidate the reviews into one report. Deduplicate overlapping findings, keep the highest severity when they conflict, group by severity (Critical → Major → Minor), preserve finding IDs. End with EXACTLY one line: \"### Verdict: APPROVED\" (no Critical/Major) or \"### Verdict: REVISE\" (≥1 Critical/Major). Nothing after it.\n\nSecurity:\n{{step-security}}\n\nCorrectness:\n{{step-correctness}}\n\nPerformance:\n{{step-performance}}"
   :spec-writer "Write a concise engineering spec for the topic below.\n\nTOPIC: {{arg-1}}\n{{stdin}}\n\nSections: Problem (1 paragraph) · Goals / Non-goals · Proposed approach · Data/API shape · Edge cases & failure modes · Risks & open questions · Acceptance criteria (testable bullets). No implementation code."
   :impact-analyzer "Given the diff below, report the blast radius.\n\nDiff:\n{{stdin}}\n\nOutput: Changed surface (functions/modules touched) · Direct callers/affected paths · Behavioral/contract changes · Now-untested behavior · Migration/compat concerns · The cheapest test that would catch a regression here. Be specific; cite symbols."
-  :threat-model "Produce a STRIDE threat model for the system/change described below.\n\nINPUT:\n{{stdin}}\n\nFor each STRIDE category (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege): plausible threats, the asset/entry point, likelihood × impact, and a concrete mitigation. End with the top 3 risks to address first."}
+  :threat-model "Produce a STRIDE threat model for the system/change described below.\n\nINPUT:\n{{stdin}}\n\nFor each STRIDE category (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege): plausible threats, the asset/entry point, likelihood × impact, and a concrete mitigation. End with the top 3 risks to address first."
+  :skeptical-verify {:file "prompts/skeptical-verify.md"}
+  :ci-diagnose {:file "prompts/ci-diagnose.md"}
+  :dependency-audit {:file "prompts/dependency-audit.md"}
+  :doc-drift {:file "prompts/doc-drift.md"}}
 
  ;; ── reusable step-sequence (orca2 _git-ship-standalone, inlined) ────────────
  :phases
@@ -140,7 +179,21 @@
            "_" "{{arg-1}}"]}
     {:id :return-to-base
      :depends-on [:create-pr]
-     :cmd ["bash" "-c" "D=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo main); git checkout \"$D\" 2>/dev/null || git checkout main 2>/dev/null || git checkout master 2>/dev/null || echo \"could not switch to $D\""]}]}}
+     :cmd ["bash" "-c" "D=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo main); git checkout \"$D\" 2>/dev/null || git checkout main 2>/dev/null || git checkout master 2>/dev/null || echo \"could not switch to $D\""]}]}
+
+  ;; ── loop-harness-style verify gate: skeptical PASS/FAIL over {{prev}} ───────
+  ;; Append {:use :verify-gate} as the tail of any write/generate workflow to
+  ;; make it refuse to "succeed" on unverified output. FAIL → cmd exits 1 →
+  ;; chain stops → process exits 1. Verdict reaches bash as $1 (injection-safe).
+  :verify-gate
+  {:doc "Skeptical reviewer emits PASS/FAIL over {{prev}}; FAIL aborts the chain"
+   :steps
+   [{:id :verify :role :critic :skill :skeptical-verify :tier :think
+     :fallback [:gemini]
+     :prompt "{{fragment:verdict-pass-fail}}\n\nWork to verify:\n{{prev}}"}
+    {:id :enforce
+     :cmd ["bash" "-c" "test \"$1\" = PASS || { echo \"BLOCKED: verifier returned '$1'\" >&2; exit 1; }; echo PASS"
+           "_" "{{step-verify}}"]}]}}
 
  ;; ── workflows ───────────────────────────────────────────────────────────────
  :workflows
@@ -186,7 +239,7 @@
      :prompt "{{fragment:gh-verdict-token}}\n\nReview:\n{{step-review}}"}
     {:id :post
      :cmd ["bash" "-c"
-           "PR=\"$1\"; FLAG=$(printf %s \"$2\" | tr -d '[:space:]'); case \"$FLAG\" in --approve|--request-changes|--comment) ;; *) FLAG=--comment ;; esac; gh pr review \"$PR\" \"$FLAG\" --body \"$3\""
+           "PR=\"$1\"; FLAG=$(printf %s \"$2\" | tr -d '[:space:]'); case \"$FLAG\" in --approve|--request-changes|--comment) ;; *) FLAG=--comment ;; esac; gh pr review \"$PR\" \"$FLAG\" --body \"$3\" && echo \"RESULT: DONE items=$PR\""
            "_" "{{arg-1}}" "{{step-verdict}}" "{{step-review}}"]}]}
 
   :triage-issue
@@ -203,7 +256,7 @@
     {:id :act
      :depends-on [:message]
      :cmd ["bash" "-c"
-           "ISSUE=\"$1\"; DEC=$(printf %s \"$2\" | tr -d '[:space:]'); BODY=\"$3\"; case \"$DEC\" in needs-info) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue edit \"$ISSUE\" --add-label needs-info >/dev/null 2>&1; echo \"triaged #$ISSUE: needs-info\";; needs-design) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue edit \"$ISSUE\" --add-label needs-design >/dev/null 2>&1; echo \"triaged #$ISSUE: needs-design\";; wontfix) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue close \"$ISSUE\" --reason \"not planned\"; echo \"triaged #$ISSUE: wontfix (closed)\";; can-fix) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue edit \"$ISSUE\" --add-label can-fix >/dev/null 2>&1; echo \"triaged #$ISSUE: can-fix\";; *) echo \"no action: unrecognized decision '$2'\" >&2; exit 1;; esac"
+           "ISSUE=\"$1\"; DEC=$(printf %s \"$2\" | tr -d '[:space:]'); BODY=\"$3\"; case \"$DEC\" in needs-info) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue edit \"$ISSUE\" --add-label needs-info >/dev/null 2>&1; echo \"triaged #$ISSUE: needs-info\";; needs-design) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue edit \"$ISSUE\" --add-label needs-design >/dev/null 2>&1; echo \"triaged #$ISSUE: needs-design\";; wontfix) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue close \"$ISSUE\" --reason \"not planned\"; echo \"triaged #$ISSUE: wontfix (closed)\";; can-fix) gh issue comment \"$ISSUE\" --body \"$BODY\" && gh issue edit \"$ISSUE\" --add-label can-fix >/dev/null 2>&1; echo \"triaged #$ISSUE: can-fix\";; *) echo \"RESULT: BLOCKED reason=unrecognized-decision\" >&2; exit 1;; esac; echo \"RESULT: DONE items=$ISSUE\""
            "_" "{{arg-1}}" "{{step-classify}}" "{{step-message}}"]}]}
 
   :code-review-multi
@@ -224,6 +277,13 @@
   {:doc "Commit (LLM message) → push → open PR. Arg: optional PR title."
    :steps [{:use :git-ship}]}
 
+  ;; loop-harness rule: never ship unverified. Skeptical PASS gate over the
+  ;; working-tree diff first; FAIL aborts before any commit/push. Arg: PR title.
+  :git-ship-verified
+  {:doc "Verify working-tree diff (PASS/FAIL) then git-ship. FAIL ⇒ no commit."
+   :stdin-cmd ["git" "diff" "HEAD"]
+   :steps [{:use :verify-gate} {:use :git-ship}]}
+
   ;; ── catalog: single-shot library workflows ───────────────────────────────
   :security-review
   {:doc "Adversarial security review. stdin = diff/code."
@@ -239,7 +299,31 @@
 
   :impact
   {:doc "Blast-radius analysis of a change. stdin = diff."
-   :steps [{:tier :think :role :test-engineer :skill :impact-analyzer :fallback [:gemini]}]}}
+   :steps [{:tier :think :role :test-engineer :skill :impact-analyzer :fallback [:gemini]}]}
+
+  ;; loop-harness-style skeptical verifier. stdin = diff/artifact.
+  ;; exit 0 = PASS, exit 1 = FAIL. Also usable as a {:use :verify-gate} tail.
+  :verify
+  {:doc "Skeptical PASS/FAIL gate over stdin (diff/artifact). exit 1 on FAIL."
+   :steps [{:use :verify-gate}]}
+
+  ;; ── loop-harness gap-closers (read-only single-shots) ────────────────────
+  ;; Each is the analysis half; pair with `{:use :git-ship}` (or pipe the patch
+  ;; to git apply) for the write half — the worktree/PR automation stays in your
+  ;; cron wrapper, not cw.
+  :fix-ci
+  {:doc "Diagnose the latest failed CI run + propose a patch. stdin overrides."
+   :stdin-cmd ["bash" "-c" "gh run view --log-failed 2>/dev/null"]
+   :steps [{:tier :think :role :test-engineer :skill :ci-diagnose :fallback [:gemini]}]}
+
+  :dep-audit
+  {:doc "Audit dependencies for outdated/advisory bumps. stdin = manifest/lockfile."
+   :steps [{:tier :think :role :security-auditor :skill :dependency-audit :fallback [:gemini]}]}
+
+  :doc-sync
+  {:doc "Find docs drifted from a code change + the patch text. stdin = diff."
+   :stdin-cmd ["git" "diff" "HEAD"]
+   :steps [{:tier :think :role :writer :skill :doc-drift :fallback [:gemini]}]}}
 
  :pricing
  {"claude" {"claude-sonnet-4-5" {:input 3.0 :output 15.0 :cached-input 0.30}

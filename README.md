@@ -394,6 +394,11 @@ declarative analogue of orca2's `:type :workflow` include — minus loops;
 | `threat-model` | 1 LLM | stdin → STRIDE threat model |
 | `spec` | 1 LLM | `"<topic>"` → engineering spec |
 | `impact` | 1 LLM | stdin diff → blast-radius analysis |
+| `verify` | `:use :verify-gate` (2) | stdin diff/artifact → skeptical PASS/FAIL gate; **exit 1 on FAIL** |
+| `git-ship-verified` | `:use :verify-gate` + `:use :git-ship` (9) | verify working-tree diff PASS, then ship; **FAIL ⇒ no commit** |
+| `fix-ci` | 1 LLM | latest failed CI log (`gh run view`) → root cause + patch diff |
+| `dep-audit` | 1 LLM | stdin manifest/lockfile → outdated + risk + bump plan |
+| `doc-sync` | 1 LLM | stdin `git diff` → doc drift + patch diff |
 
 `pr-review`/`research`/`content`/`git-ship`/`triage-issue` are ported from
 orca2. `pr-review` recreates orca2's verdict-conditional post-back as **cw
@@ -402,6 +407,27 @@ a shell step passes it plus the review body as bash **positional args**
 (`$1..$3`) — never spliced into the script — so arbitrary review content is
 injection-inert (verified). GitHub-mutating workflows need an authenticated
 `gh`; `git-ship`'s commit step needs claude with Bash tool access.
+
+### Verify gate & the RESULT protocol
+
+`:verify-gate` is a reusable phase (loop-harness pattern): a skeptical `:critic`
+emits one `PASS`/`FAIL` token, and a shell step turns `FAIL` into a nonzero exit
+that **stops the chain** (the verdict is passed as a bash positional `$1`, never
+spliced — injection-inert). Use it standalone (`git diff | cw verify` → exit 1
+on FAIL) or append `{:use :verify-gate}` as the tail of any write/generate
+workflow so it refuses to "succeed" on unverified output.
+
+The `{{fragment:result-line}}` snippet makes a prompt end with a machine-readable
+`RESULT: DONE items=N | NOTHING_TO_DO | BLOCKED reason=…` line. With the opt-in
+`--result-codes` flag, a successful run maps that sentinel to an exit code
+(`NOTHING_TO_DO`/`DONE`→0, `BLOCKED`→2); without the flag, exit codes are
+unchanged (legacy 0/1 on success/failure).
+
+The shipped action workflows already emit it: `triage-issue` ends `RESULT: DONE
+items=<issue>` (or `BLOCKED` on an unrecognized decision) and `pr-review` ends
+`RESULT: DONE items=<pr>`. So a cron wrapper — `cw`'s no-daemon answer to
+loop-harness's scheduler — can branch on the exit code:
+`while read n; do cw triage-issue "$n" --result-codes || log-blocked "$n"; done`.
 
 ---
 

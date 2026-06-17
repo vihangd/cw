@@ -8,7 +8,8 @@
                                     'cw.workflow-test 'cw.state-test
                                     'cw.replay-test 'cw.provider-test
                                     'cw.config-test 'cw.meta-test
-                                    'cw.gate-test 'cw.main-test)
+                                    'cw.gate-test 'cw.main-test
+                                    'cw.result-test)
                            (let [{:keys [fail error]}
                                  (clojure.test/run-all-tests (re-pattern "cw\\..*-test"))]
                              (System/exit (if (zero? (+ fail error)) 0 1))))}

@@ -23,6 +23,7 @@
    :json         {:coerce :boolean}
    :dry-run      {:coerce :boolean}
    :no-log       {:coerce :boolean}
+   :result-codes {:coerce :boolean}
    :runs         {:coerce :long :default 5}
    :limit        {:coerce :long}
    :fixture      {}
@@ -295,7 +296,7 @@
         (let [result (dispatch config sub rest-t opts)]
           (maybe-log! config result opts raw-args)
           (handle-output result opts)
-          (System/exit (if (:ok? result) 0 1))))
+          (System/exit (r/result-exit-code result (:result-codes opts)))))
       (catch clojure.lang.ExceptionInfo e
         (v/warn (.getMessage e))
         (when-let [errs (:errors (ex-data e))]
