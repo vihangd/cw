@@ -52,7 +52,8 @@
   (let [text
         (if (:all opts)
           (str/join "\n\n"
-                    (for [[k w] (:workflows config)]
+                    (for [[k _] (:workflows config)
+                          :let [w (config/resolve-workflow config (name k))]]
                       (workflow->mermaid (name k) w)))
           (let [name (first tail)
                 w (config/resolve-workflow config name)]

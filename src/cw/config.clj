@@ -24,13 +24,20 @@
 (defn- read-defaults []
   (read-edn (io/resource "cw/default-config.edn")))
 
+(defn- read-edn-warn [f label]
+  (try (read-edn f)
+       (catch Exception e
+         (binding [*out* *err*]
+           (println (str "cw warn: " label ": " (.getMessage e))))
+         nil)))
+
 (defn- read-user []
   (let [f (io/file (config-path))]
-    (when (.exists f) (read-edn f))))
+    (when (.exists f) (read-edn-warn f (str "user config " (config-path))))))
 
 (defn- read-project []
   (let [f (io/file ".cw.edn")]
-    (when (.exists f) (read-edn f))))
+    (when (.exists f) (read-edn-warn f "project config .cw.edn"))))
 
 (defn deep-merge
   "Recursively merges maps. Non-map values from the right win. Used to layer

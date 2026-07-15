@@ -32,7 +32,8 @@
    :inputs-file  {}
    :workflow     {}
    :all          {:coerce :boolean}
-   :step         {}})
+   :step         {}
+   :providers    {}})
 
 (defn- extract-verbosity
   "babashka.cli doesn't count repeated short flags; strip -v/-vv ourselves."
@@ -99,7 +100,10 @@
   (let [default-p (or (opt-provider config opts) (:default-provider config))
         so    (step-opts opts)
         steps (if-let [sf (:steps-file opts)]
-                (apply-step-opts (:steps (edn/read-string (slurp sf))) so)
+                (let [raw (->> (edn/read-string (slurp sf)) :steps
+                               (config/expand-phases config)
+                               (mapv #(config/expand-step config %)))]
+                  (apply-step-opts raw so))
                 (chain/parse-chain-steps config tail default-p so))
         stdin (workflow/piped-stdin)]
     (chain/run-chain config
@@ -183,6 +187,7 @@
   (case sub
     nil         (r/ok-result "usage: cw [PROMPT] | cw <workflow> | cw chain ...")
     "providers" (print-providers config)
+    "list"      (print-workflows config)
     "workflows" (print-workflows config)
     "roles"     (print-library config :roles)
     "skills"    (print-library config :skills)

@@ -8,7 +8,9 @@
 (defn run [config prompt opts]
   (when-not prompt
     (throw (ex-info "usage: cw compare PROMPT" {})))
-  (let [keys (keys (:providers config))
+  (let [keys (if-let [ps (:providers opts)]
+               (map keyword (str/split ps #",\s*"))
+               (keys (:providers config)))
         results (->> keys
                      (pmap (fn [k]
                              [k (try

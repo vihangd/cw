@@ -13,8 +13,13 @@
       (when-not (str/blank? s) s))))
 
 (defn- stdin-cmd-output [cmd]
-  (let [{:keys [out exit]} @(p/process cmd {:out :string :err :string})]
-    (when (zero? exit) (str/trim out))))
+  (let [{:keys [out exit err]} @(p/process cmd {:out :string :err :string})]
+    (if (zero? exit)
+      (str/trim out)
+      (binding [*out* *err*]
+        (println (str "cw warn: :stdin-cmd exited " exit
+                      (when-not (str/blank? err) (str ": " (str/trim err)))))
+        nil))))
 
 (defn resolve-stdin
   "Precedence: explicitly piped stdin > workflow :stdin-cmd > nil."

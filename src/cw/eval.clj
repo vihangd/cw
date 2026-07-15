@@ -27,10 +27,11 @@
     (throw (ex-info "usage: cw eval <workflow> --runs N" {})))
   (let [runs (or (:runs opts) 5)
         fixture (when (:fixture opts) (slurp (:fixture opts)))
-        crs (vec (for [_ (range runs)]
-                   (workflow/run-workflow config workflow-name []
-                                          (cond-> opts
-                                            fixture (assoc :stdin fixture)))))
+        crs (vec (pmap (fn [_]
+                         (workflow/run-workflow config workflow-name []
+                                                (cond-> opts
+                                                  fixture (assoc :stdin fixture))))
+                       (range runs)))
         texts (mapv :final-text crs)
         costs (vec (keep :total-cost-usd crs))
         durs  (mapv (comp double #(or % 0) :total-duration-ms) crs)
