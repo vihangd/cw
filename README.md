@@ -41,7 +41,7 @@ Requires `bb` (Babashka ≥ 1.12) and `bbin`. Provider CLIs (`claude`,
 ### Local development
 
 ```bash
-bb test               # hermetic unit suite (no network) — 78 tests
+bb test               # hermetic unit suite (no network) — 80 tests
 bb install-local      # bbin install . --as cw
 bb uninstall          # bbin uninstall cw
 bb doctor             # run doctor from source
@@ -80,10 +80,12 @@ cw pr-review 1234                               # review → verdict → posts b
 cw chain --steps-file gated.edn -y              # -y auto-approves any :gate steps
 
 # Discover the shared library / inspect
+cw list                                            # all workflows + docs
 cw workflows ; cw roles ; cw skills ; cw phases
 
 # Compare / fan-out / eval
 cw compare "one prompt → every configured provider, in parallel"
+cw compare --providers claude,gemini "compare these two only"
 cw fanout --inputs 'docs/*.md' --prompt-file summarize.txt -p c
 cw eval commit-msg --runs 5 --fixture sample.diff
 
@@ -119,7 +121,7 @@ cw doctor
 | `cw eval <workflow> --runs N` | Run a workflow N times, report variance |
 | `cw replay <run-id>` | Re-run a logged chain (optionally altered) |
 | `cw providers` | List configured providers |
-| `cw workflows` | List configured workflows |
+| `cw list` / `cw workflows` | List configured workflows |
 | `cw roles` / `skills` / `fragments` / `phases` | List the shared prompt/phase library |
 | `cw graph <workflow>` / `--all` | Emit a Mermaid flowchart |
 | `cw doctor` | Diagnose provider CLIs, integrations, config, state |
@@ -157,10 +159,13 @@ exception is `chain`'s per-step `-p`, which is positional within the chain.
 | `--limit N` | `runs list`: how many to show (default 20) |
 | `--provider` / `--model` / `--step N` | `replay`: override provider/model, or re-run from step N |
 | `--all` | `graph`: every workflow |
+| `--providers <p1,p2>` | `compare`: limit to a comma-separated subset of providers |
+| `--result-codes` | Map `RESULT:` sentinel to exit codes (`BLOCKED`→2, `NOTHING_TO_DO`/`DONE`→0) |
 
 ### Provider aliases
 
-`c` → claude (default) · `g` → gemini · `x` / `o` → codex · `q` → qwen.
+`c` → claude (default) · `g` → gemini · `x` / `o` → codex · `q` → qwen ·
+`ny` → nyma · `nls` → nyma-local (local model via Ollama-compatible endpoint).
 Custom providers declare their own aliases in config.
 
 ---
@@ -239,12 +244,12 @@ shell (`:cmd`), gate (`:gate`), or phase-splice (`:use`). `:tier`/`:role`/
 `:skill`/`:use` and `{{fragment:…}}` are the shared-library keys (see the
 **Shared prompt library** subsection under *Configuration*).
 
-> **Scope:** the shared library + `:phases` are expanded only for **named
-> workflows** (`cw <workflow>`). Ad-hoc `cw chain` and `--steps-file` plans
-> run their steps **as written** — shell, LLM, and `:gate` steps all work,
-> but `:role`/`:skill`/`:tier`/`:use`/`{{fragment:…}}` are *not* resolved
-> there (give such steps an explicit `:provider`/`:prompt`). This keeps
-> ad-hoc chains a zero-magic literal plan.
+> **Scope:** the shared library + `:phases` are expanded for **named
+> workflows** (`cw <workflow>`) and **`--steps-file`** plans. Ad-hoc
+> `cw chain P1 P2 …` runs its prompts **as written** — `:role`/`:skill`/
+> `:tier`/`:use`/`{{fragment:…}}` are not resolved there (give prompts
+> explicitly). `--steps-file` is the way to get library expansion without
+> defining a named workflow.
 
 ## Gates (human approval)
 
@@ -549,7 +554,7 @@ src/cw/
 
 `bb test` runs a hermetic suite (no network — provider behaviour is exercised
 via local `true`/`false`/missing binaries and captured fixtures):
-**78 tests, 256 assertions**. Coverage spans parsing, chain/DAG, workflows,
+**80 tests, 290 assertions**. Coverage spans parsing, chain/DAG, workflows,
 state, replay, the provider fallback loop, `build-command`/`classify`/
 `retryable?`, config deep-merge/validate (incl. **blank-prompt rejection**
 and `:file` classpath fallback), the shared-library expansion (role+skill+
